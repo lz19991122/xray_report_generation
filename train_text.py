@@ -84,8 +84,8 @@ if __name__ == "__main__":
         MAX_VIEWS = 2
         NUM_LABELS = 114 # (14 diseases + 100 top noun-phrases)
         NUM_CLASSES = 2
-        
-        dataset = NLMCXR('/home/hoang/Datasets/NLMCXR/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
+
+        dataset = NLMCXR('/home/lihongzhao/xray_report_generation/datasets/iu_xray/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
         train_data, val_data, test_data = dataset.get_subsets(seed=123)
         
         VOCAB_SIZE = len(dataset.vocab)
@@ -137,8 +137,8 @@ if __name__ == "__main__":
     last_epoch = -1
     best_metric = 0
 
-    checkpoint_path_from = 'checkpoints/{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,COMMENT)
-    checkpoint_path_to = 'checkpoints/{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,COMMENT)
+    checkpoint_path_from = '/home/lihongzhao/xray_report_generation/checkpoints/{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,COMMENT)
+    checkpoint_path_to = '/home/lihongzhao/xray_report_generation/checkpoints/{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,COMMENT)
     
     if RELOAD:
         last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model, optimizer, scheduler)

@@ -22,17 +22,17 @@ from models import Classifier, TNN
 from baselines.transformer.models import LSTM_Attn
 
 # --- Hyperparameters ---
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=0)
 
-DATASET_NAME = 'MIMIC' # MIMIC / NLMCXR
-MODEL_NAME = 'LSTM' # Transformer / LSTM
+DATASET_NAME = 'NLMCXR' # MIMIC / NLMCXR
+MODEL_NAME = 'Transformer' # Transformer / LSTM
 BATCH_SIZE = 32
 
-TEXT_FILE = 'outputs/{}_ClsGen_DenseNet121_MaxView2_NumLabel114_NoHistory_Hyp.txt'.format(DATASET_NAME)
-LABEL_FILE = 'outputs/{}_ClsGen_DenseNet121_MaxView2_NumLabel114_NoHistory_Lbl.txt'.format(DATASET_NAME)
+TEXT_FILE = 'outputs/{}_ClsGen_ResNet50_MaxView2_NumLabel114_History_Hyp.txt'.format(DATASET_NAME)
+LABEL_FILE = 'outputs/{}_ClsGen_ResNet50_MaxView2_NumLabel114_History_Lbl.txt'.format(DATASET_NAME)
 
 if __name__ == "__main__":
     # --- Choose Inputs/Outputs
@@ -74,7 +74,7 @@ if __name__ == "__main__":
         NUM_CLASSES = 2
         
         dataset = TextDataset(text_file=TEXT_FILE, label_file=LABEL_FILE, sources=SOURCES, targets=TARGETS,
-                              vocab_file='/home/hoang/Datasets/NLMCXR/nlmcxr_unigram_1000.model', max_len=1000)
+                              vocab_file='/home/lihongzhao/xray_report_generation/datasets/iu_xray/nlmcxr_unigram_1000.model', max_len=1000)
         
         VOCAB_SIZE = len(dataset.vocab)
         POSIT_SIZE = dataset.max_len

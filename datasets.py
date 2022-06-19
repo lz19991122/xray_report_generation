@@ -415,7 +415,8 @@ class NLMCXR(data.Dataset): # Open-I Dataset
             img_files = np.array(images)[new_orders].tolist()
 
             for i in range(min(self.max_views,len(img_files))):
-                img_file = self.dir + 'images/' + img_files[i] + '.png'
+#                img_file = self.dir + 'images/' + img_files[i] + '.png'
+                img_file = self.dir + img_files[i] + '.png'
                 img = Image.open(img_file).convert('RGB')
                 imgs.append(self.transform(img).unsqueeze(0)) # (1,C,W,H)
                 vpos.append(1) # We do not know what view position of the image is, so just let it be 1
@@ -546,7 +547,7 @@ class NLMCXR(data.Dataset): # Open-I Dataset
     
 class TextDataset(data.Dataset):
     def __init__(self, text_file, label_file, sources=['caption'], targets=['label'],
-                 vocab_file='/home/hoang/Datasets/MIMIC/mimic_unigram_1000.model', max_len=1000):
+                 vocab_file='/home/lihongzhao/xray_report_generation/Vocabulary/mimic_unigram_1000.model', max_len=1000):
         self.text_file = text_file
         self.label_file = label_file
         self.vocab = spm.SentencePieceProcessor(model_file=vocab_file)

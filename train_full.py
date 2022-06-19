@@ -33,7 +33,7 @@ def find_optimal_cutoff(target, predicted):
     ix = np.argmax(gmeans)
     return threshold[ix]
 
-def infer(data_loader, model, device='cpu', threshold=None):
+def infer(data_loader, model, device='cuda', threshold=None):
     model.eval()
     outputs = []
     targets = []
@@ -46,9 +46,9 @@ def infer(data_loader, model, device='cpu', threshold=None):
 
             # Use single input if there is no clinical history
             if threshold != None:
-                output = model(image=source[0], history=source[3], threshold=threshold)
+                # output = model(image=source[0], history=source[3], threshold=threshold)
                 # output = model(image=source[0], threshold=threshold)
-                # output = model(image=source[0], history=source[3], label=source[2])
+                output = model(image=source[0], history=source[3], label=source[2])
                 # output = model(image=source[0], label=source[2])
             else:
                 # output = model(source[0], source[1])
@@ -63,15 +63,15 @@ def infer(data_loader, model, device='cpu', threshold=None):
     return outputs, targets
 
 # --- Hyperparameters ---
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=123)
 
 RELOAD = True # True / False
 PHASE = 'INFER' # TRAIN / TEST / INFER
-DATASET_NAME = 'MIMIC' # NIHCXR / NLMCXR / MIMIC 
-BACKBONE_NAME = 'DenseNet121' # ResNeSt50 / ResNet50 / DenseNet121
+DATASET_NAME = 'NLMCXR' # NIHCXR / NLMCXR / MIMIC
+BACKBONE_NAME = 'ResNet50' # ResNeSt50 / ResNet50 / DenseNet121
 MODEL_NAME = 'ClsGenInt' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
 
 if DATASET_NAME == 'MIMIC':
@@ -133,7 +133,7 @@ if __name__ == "__main__":
         NUM_LABELS = 114
         NUM_CLASSES = 2
 
-        dataset = NLMCXR('/home/hoang/Datasets/NLMCXR/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
+        dataset = NLMCXR('/home/lihongzhao/xray_report_generation/datasets/iu_xray/NLMCXR_png/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
         train_data, val_data, test_data = dataset.get_subsets(seed=123)
         
         VOCAB_SIZE = len(dataset.vocab)
@@ -314,8 +314,8 @@ if __name__ == "__main__":
     checkpoint_path_to = 'checkpoints/{}_{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,BACKBONE_NAME,COMMENT)
     
     if RELOAD:
-        last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model, optimizer, scheduler) # Reload
-        # last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model) # Fine-tune
+        # last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model, optimizer, scheduler) # Reload
+        last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model) # Fine-tune
         print('Reload From: {} | Last Epoch: {} | Validation Metric: {} | Test Metric: {}'.format(checkpoint_path_from, last_epoch, best_metric, test_metric))
 
     if PHASE == 'TRAIN':
@@ -328,7 +328,8 @@ if __name__ == "__main__":
             test_loss = test(test_loader, model, criterion, device='cuda', kw_src=KW_SRC, kw_tgt=KW_TGT, kw_out=KW_OUT, return_results=False)
             
             scheduler.step()
-            
+            if MODEL_NAME == 'ClsGenInt':
+                best_metric = 10
             if best_metric > val_loss:
                 best_metric = val_loss
                 save(checkpoint_path_to, model, optimizer, scheduler, epoch, (val_loss, test_loss))
