@@ -166,7 +166,7 @@ class Classifier(nn.Module):
             
             img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics, -1) # (B,F) --> (B,T*E) --> (B,T,E)   
             txt_features, txt_attention = self.txt_features(txt_features, topic_embed, pad_mask) # (B,T,E), (B,T,L)
-            final_embed = self.normalize(img_features + txt_features) # (B,T,E)
+            final_embed = self.normalize(img_features + txt_features) # (B,T,E) final_embed=D(fused)
             
         elif img != None:
             topic_index = torch.arange(self.num_topics).unsqueeze(0).repeat(img_features.shape[0],1).to(img_features.device) # (B,T)
@@ -184,7 +184,7 @@ class Classifier(nn.Module):
             state_embed = self.state_embedding(state_index) # (B,C,E)
 
             txt_features, txt_attention = self.txt_features(txt_features, topic_embed, pad_mask) # (B,T,E), (B,T,L)
-            final_embed = txt_features # (B,T,E)
+            final_embed = txt_features # (B,T,E) final_embed=D(fused)
             
         else:
             raise ValueError('img and (txt or txt_embed) must not be all none')
@@ -193,12 +193,12 @@ class Classifier(nn.Module):
         emb, att = self.attention(state_embed, final_embed) # (B,T,E), (B,T,C)
         
         if lbl != None: # Teacher forcing
-            emb = self.state_embedding(lbl) # (B,T,E)
+            emb = self.state_embedding(lbl) # (B,T,E)  emb=D(states)
         else:
             emb = self.state_embedding((att[:,:,1] > threshold).long()) # (B,T,E)
             
         if get_embed:
-            return att, final_embed + emb # (B,T,C), (B,T,E)
+            return att, final_embed + emb # (B,T,C), (B,T,E) att=D(topics)
         elif get_txt_att and (txt != None or txt_embed != None):
             return att, txt_attention # (B,T,C), (B,T,L)
         else:

@@ -46,9 +46,9 @@ def infer(data_loader, model, device='cuda', threshold=None):
 
             # Use single input if there is no clinical history
             if threshold != None:
-                # output = model(image=source[0], history=source[3], threshold=threshold)
+                output = model(image=source[0], history=source[3], threshold=threshold)
                 # output = model(image=source[0], threshold=threshold)
-                output = model(image=source[0], history=source[3], label=source[2])
+                # output = model(image=source[0], history=source[3], label=source[2])
                 # output = model(image=source[0], label=source[2])
             else:
                 # output = model(source[0], source[1])
@@ -68,11 +68,11 @@ os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=123)
 
-RELOAD = True # True / False
-PHASE = 'INFER' # TRAIN / TEST / INFER
+RELOAD = False # True / False
+PHASE = 'TRAIN' # TRAIN / TEST / INFER
 DATASET_NAME = 'NLMCXR' # NIHCXR / NLMCXR / MIMIC
-BACKBONE_NAME = 'ResNet50' # ResNeSt50 / ResNet50 / DenseNet121
-MODEL_NAME = 'ClsGenInt' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
+BACKBONE_NAME = 'DenseNet121' # ResNeSt50 / ResNet50 / DenseNet121
+MODEL_NAME = 'ClsGen' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
 
 if DATASET_NAME == 'MIMIC':
     EPOCHS = 50 # Start overfitting after 20 epochs
@@ -135,7 +135,6 @@ if __name__ == "__main__":
 
         dataset = NLMCXR('/home/lihongzhao/xray_report_generation/datasets/iu_xray/NLMCXR_png/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
         train_data, val_data, test_data = dataset.get_subsets(seed=123)
-        
         VOCAB_SIZE = len(dataset.vocab)
         POSIT_SIZE = dataset.max_len
         COMMENT = 'MaxView{}_NumLabel{}_{}History'.format(MAX_VIEWS, NUM_LABELS, 'No' if 'history' not in SOURCES else '')
@@ -154,7 +153,8 @@ if __name__ == "__main__":
         FC_FEATURES = 2048
         
     elif BACKBONE_NAME == 'DenseNet121':
-        backbone = torch.hub.load('pytorch/vision:v0.5.0', 'densenet121', pretrained=True)
+        # backbone = torch.hub.load('pytorch/vision:v0.5.0', 'densenet121', pretrained=True)
+        backbone = models.densenet121(pretrained=True)
         FC_FEATURES = 1024
         
     else:
@@ -314,13 +314,13 @@ if __name__ == "__main__":
     checkpoint_path_to = 'checkpoints/{}_{}_{}_{}.pt'.format(DATASET_NAME,MODEL_NAME,BACKBONE_NAME,COMMENT)
     
     if RELOAD:
-        # last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model, optimizer, scheduler) # Reload
-        last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model) # Fine-tune
+        last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model, optimizer, scheduler) # Reload
+        # last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, model) # Fine-tune
         print('Reload From: {} | Last Epoch: {} | Validation Metric: {} | Test Metric: {}'.format(checkpoint_path_from, last_epoch, best_metric, test_metric))
 
     if PHASE == 'TRAIN':
         scaler = torch.cuda.amp.GradScaler()
-        
+
         for epoch in range(last_epoch+1, EPOCHS):
             print('Epoch:', epoch)
             train_loss = train(train_loader, model, optimizer, criterion, device='cuda', kw_src=KW_SRC, kw_tgt=KW_TGT, kw_out=KW_OUT, scaler=scaler)
@@ -328,8 +328,6 @@ if __name__ == "__main__":
             test_loss = test(test_loader, model, criterion, device='cuda', kw_src=KW_SRC, kw_tgt=KW_TGT, kw_out=KW_OUT, return_results=False)
             
             scheduler.step()
-            if MODEL_NAME == 'ClsGenInt':
-                best_metric = 10
             if best_metric > val_loss:
                 best_metric = val_loss
                 save(checkpoint_path_to, model, optimizer, scheduler, epoch, (val_loss, test_loss))
@@ -380,7 +378,7 @@ if __name__ == "__main__":
         # print('Micro Recall   : {}'.format(metrics.recall_score(test_targets.cpu()[...,:NUM_LABELS] == 1, test_outputs.cpu()[...,:NUM_LABELS,1] > threshold, average='micro')))
         
     elif PHASE == 'INFER':
-        txt_test_outputs, txt_test_targets = infer(test_loader, model, device='cuda', threshold=0.25)
+        txt_test_outputs, txt_test_targets = infer(test_loader, model, device='cuda', threshold=0.19)
         gen_outputs = txt_test_outputs[0]
         gen_targets = txt_test_targets[0]
         
