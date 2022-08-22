@@ -22,7 +22,7 @@ from tqdm import tqdm
 from utils import save, load, train, test, data_to_device, data_concatenate
 from datasets import NIHCXR, MIMIC, NLMCXR
 from losses import CELoss, CELossTotal, CELossTotalEval, CELossTransfer, CELossShift
-from modelpmask import CNN, MVCNN, TNN, Classifier, Generator, ClsGen, ClsGenInt
+from models import CNN, MVCNN, TNN, Classifier, Generator, ClsGen, ClsGenInt
 from baselines.transformer.models import LSTM_Attn, Transformer, GumbelTransformer
 from baselines.rnn.models import ST
 
@@ -68,11 +68,11 @@ os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=123)
 
-RELOAD = True # True / False
-PHASE = 'INFER' # TRAIN / TEST / INFER
+RELOAD = False # True / False
+PHASE = 'TRAIN' # TRAIN / TEST / INFER
 DATASET_NAME = 'NLMCXR' # NIHCXR / NLMCXR / MIMICn
 BACKBONE_NAME = 'DenseNet121' # ResNeSt50 / ResNet50 / DenseNet121
-MODEL_NAME = 'ClsGenInt' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
+MODEL_NAME = 'ClsGen' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
 
 if DATASET_NAME == 'MIMIC':
     EPOCHS = 50 # Start overfitting after 20 epochs
