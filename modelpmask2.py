@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+
 # --- Transformer Modules ---
 class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.0):
@@ -13,13 +14,43 @@ class MultiheadAttention(nn.Module):
     def forward(self, input, query, pad_mask=None, att_mask=None):
         input = input.permute(1, 0, 2)  # (V,B,E)
         query = query.permute(1, 0, 2)  # (Q,B,E)
-        embed, att = self.attention(query, input, input, key_padding_mask=pad_mask,
-                                    attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
+        embed, att = self.attention(query, input, input, key_padding_mask=pad_mask, attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
 
         embed = self.normalize(embed + query)  # (Q,B,E)
         embed = embed.permute(1, 0, 2)  # (B,Q,E)
         return embed, att  # (B,Q,E), (B,Q,V)
 
+class MultiheadAttention2(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout)
+        self.normalize = nn.LayerNorm(embed_dim)
+
+    def forward(self, query, value, key, pad_mask=None, att_mask=None):
+        query = query.permute(1, 0, 2)  # (Q,B,E)
+        value = value.permute(1, 0, 2)  # (V,B,E))
+        key = key.permute(1, 0, 2)      # (K,B,E)
+        embed, att = self.attention(query, value, key, key_padding_mask=pad_mask, attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
+
+        embed = self.normalize(embed + query)  # (Q,B,E)
+        embed = embed.permute(1, 0, 2)  # (B,Q,E)
+        return embed, att  # (B,Q,E), (B,Q,V)
+
+class MultiheadAttention3(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout)
+        self.normalize = nn.LayerNorm(embed_dim)
+
+    def forward(self, query, key, value, pad_mask=None, att_mask=None):
+        query = query.permute(1, 0, 2)  # (Q,B,E)
+        value = value.permute(1, 0, 2)  # (V,B,E))
+        key = key.permute(1, 0, 2)      # (K,B,E)
+        embed, att = self.attention(query, key, value, key_padding_mask=pad_mask, attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
+
+        embed = self.normalize(embed + query)  # (Q,B,E)
+        embed = embed.permute(1, 0, 2)  # (B,Q,E)
+        return embed, att  # (B,Q,E), (B,Q,V)
 
 class PointwiseFeedForward(nn.Module):
     def __init__(self, emb_dim, fwd_dim, dropout=0.0):
@@ -49,6 +80,18 @@ class TransformerLayer(nn.Module):
         emb = self.fwd_layer(emb)
         return emb, att
 
+class TransformerLayer2(nn.Module):
+    def __init__(self, embed_dim, num_heads, fwd_dim, dropout=0.0):
+        super().__init__()
+        self.attention = MultiheadAttention(embed_dim, num_heads, dropout)
+        self.attention3 = MultiheadAttention3(embed_dim, num_heads, dropout)
+        self.fwd_layer = PointwiseFeedForward(embed_dim, fwd_dim, dropout)
+
+    def forward(self, input, input2, pad_mask=None, pad_mask2=None, att_mask=None):
+        emb, att = self.attention(input, input, pad_mask, att_mask)
+        emb, att = self.attention3(emb, input2, input2, pad_mask2)
+        emb = self.fwd_layer(emb)
+        return emb, att
 
 class TNN(nn.Module):
     def __init__(self, embed_dim, num_heads, fwd_dim, dropout=0.1, num_layers=1,
@@ -149,6 +192,7 @@ class Classifier(nn.Module):
         self.tnn = tnn
         self.img_features = nn.Linear(fc_features, num_topics * embed_dim) if cnn != None else None
         self.txt_features = MultiheadAttention(embed_dim, num_heads, dropout) if tnn != None else None
+        self.txt_features2 = MultiheadAttention2(embed_dim, num_heads, dropout) if tnn != None else None
 
         # For classification
         self.topic_embedding = nn.Embedding(num_topics, embed_dim)
@@ -189,11 +233,11 @@ class Classifier(nn.Module):
             state_embed = self.state_embedding(state_index)  # (B,C,E),(8,2,256)
             # print("img_features_{},txt_features_{}".format(img_features.shape, txt_features.shape))
             # print(self.img_features(img_features).shape)
-            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,
-                                                                -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics, -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
             # img_features_torch.Size([8, 1024])-->([8, 114, 256])
-            txt_features, txt_attention = self.txt_features(txt_features, topic_embed,
-                                                            pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features2 = img_features + topic_embed
+            txt_features, txt_attention = self.txt_features2(img_features2, txt_features, txt_features, pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features, txt_attention = self.txt_features2(img_features2, img_features2, txt_features)
             # ([8, 114, 256]),([8, 114, 1000])= self.txt_features((8, 1000, 256), (8,114,256), (8, 1000))
             final_embed = self.normalize(img_features + txt_features)  # (B,T,E) final_embed=D(fused)
             # final_embed = img_features + txt_features  # (B,T,E) final_embed=D(fused)
@@ -230,10 +274,11 @@ class Classifier(nn.Module):
         if lbl != None:  # Teacher forcing
             emb = self.state_embedding(lbl)  # (B,T,E)
         else:
-             emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
+            emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
+        emb2 = self.state_embedding((att[:, :, 1] > threshold).long())
 
         if get_embed:
-            return att, final_embed, emb  # (B,T,C), (B,T,E)
+            return att, final_embed, emb, emb2  # (B,T,C), (B,T,E)
         elif get_txt_att and (txt != None or txt_embed != None):
             return att, txt_attention  # (B,T,C), (B,T,L)
         else:
@@ -280,17 +325,17 @@ class Classifier(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, num_tokens, num_posits, embed_dim=128, num_heads=1, fwd_dim=256, dropout=0.1, num_layers=12):
+    def __init__(self, num_tokens, num_posits, embed_dim=128, num_heads=1, fwd_dim=256, dropout=0.1, num_layers=6):
         super().__init__()
         self.token_embedding = nn.Embedding(num_tokens, embed_dim)
         self.posit_embedding = nn.Embedding(num_posits, embed_dim)
-        self.transform = nn.ModuleList(
-            [TransformerLayer(embed_dim, num_heads, fwd_dim, dropout) for _ in range(num_layers)])
+        self.transform2 = nn.ModuleList(
+            [TransformerLayer2(embed_dim, num_heads, fwd_dim, dropout) for _ in range(num_layers)])
         self.attention = MultiheadAttention(embed_dim, num_heads)
         self.num_tokens = num_tokens
         self.num_posits = num_posits
 
-    def forward(self, source_embed, token_index=None, source_pad_mask=None, target_pad_mask=None, max_len=300, top_k=1,
+    def forward(self, source_embed, source_embed2, token_index=None, source_pad_mask=None, target_pad_mask=None, max_len=300, top_k=1,
                 bos_id=1, pad_id=3, mode='eye'):
         # source_embed.shape ([8, 114, 256])
         if token_index != None:  # --- Training/Testing Phase ---
@@ -302,38 +347,38 @@ class Generator(nn.Module):
             target_embed = token_embed + posit_embed  # (B,L,E)
 
             # Make embedding, attention mask, pad mask for Transformer Decoder
-            final_embed = torch.cat([source_embed, target_embed], dim=1)  # (B,T+L,E) ([8, 1114, 256])
+            # final_embed = torch.cat([source_embed, target_embed], dim=1)  # (B,T+L,E) ([8, 1114, 256])
+            final_embed = target_embed
             if source_pad_mask == None:
                 source_pad_mask = torch.zeros((source_embed.shape[0], source_embed.shape[1]),
                                               device=source_embed.device).bool()  # (B,T)
             if target_pad_mask == None:
                 target_pad_mask = torch.zeros((target_embed.shape[0], target_embed.shape[1]),
                                               device=target_embed.device).bool()  # (B,L)
-            pad_mask = torch.cat([source_pad_mask, target_pad_mask], dim=1)  # (B,T+L) ([8, 1114])
-            att_mask = self.generate_square_subsequent_mask_with_source(source_embed.shape[1], target_embed.shape[1],
-                                                                        mode).to(
-                final_embed.device)  # (T+L,T+L) ([1114, 1114])
-
+            # pad_mask = torch.cat([source_pad_mask, target_pad_mask], dim=1)  # (B,T+L) ([8, 1114])
+            pad_mask = target_pad_mask
+            pad_mask2 = source_pad_mask
+            # att_mask = self.generate_square_subsequent_mask_with_source(source_embed.shape[1], target_embed.shape[1], mode).to(final_embed.device)  # (T+L,T+L) ([1114, 1114])
+            att_mask = self.generate_square_subsequent_mask_with_source2(target_embed.shape[1]).to(final_embed.device)
             # Transformer Decoder
-            for i in range(len(self.transform)):
-                final_embed = self.transform[i](final_embed, pad_mask, att_mask)[0]
+            for i in range(len(self.transform2)):
+                final_embed = self.transform2[i](final_embed, source_embed2, pad_mask, pad_mask2, att_mask)[0]
                 # ([8, 1114, 256])
 
             # Make prediction for next tokens
             token_index = torch.arange(self.num_tokens).unsqueeze(0).repeat(token_index.shape[0], 1).to(
                 token_index.device)  # (1,K) --> (B,K) ([8, 1000])
             token_embed = self.token_embedding(token_index)  # (B,K,E) ([8, 1000, 256])
-            emb, att = self.attention(token_embed,
-                                      final_embed)  # (B,T+L,E), (B,T+L,K)  ([8, 1114, 256]), ([8, 1114, 1000])
+            emb, att = self.attention(token_embed, final_embed)  # (B,T+L,E), (B,T+L,K)  ([8, 1114, 256]), ([8, 1114, 1000])
             # Truncate results from source_embed
-            emb = emb[:, source_embed.shape[1]:, :]  # (B,L,E)  ([8, 1000, 256])
-            att = att[:, source_embed.shape[1]:, :]  # (B,L,K)  ([8, 1000, 1000])
+            # emb = emb[:, source_embed.shape[1]:, :]  # (B,L,E)  ([8, 1000, 256])
+            # att = att[:, source_embed.shape[1]:, :]  # (B,L,K)  ([8, 1000, 1000])
             return att, emb
 
         else:  # --- Inference Phase ---
-            return self.infer(source_embed, source_pad_mask, max_len, top_k, bos_id, pad_id)
+            return self.infer(source_embed, source_embed2, source_pad_mask, max_len, top_k, bos_id, pad_id)
 
-    def infer(self, source_embed, source_pad_mask=None, max_len=100, top_k=1, bos_id=1, pad_id=3):
+    def infer(self, source_embed, source_embed2, source_pad_mask=None, max_len=100, top_k=1, bos_id=1, pad_id=3):
         outputs = torch.ones((top_k, source_embed.shape[0], 1), dtype=torch.long).to(
             source_embed.device) * bos_id  # (K,B,1) <s>
         scores = torch.zeros((top_k, source_embed.shape[0]), dtype=torch.float32).to(source_embed.device)  # (K,B)
@@ -345,7 +390,7 @@ class Generator(nn.Module):
                 output = outputs[k]  # (B,L)
                 score = scores[k]  # (B)
 
-                att, emb = self.forward(source_embed, output, source_pad_mask=source_pad_mask,
+                att, emb = self.forward(source_embed, source_embed2, output, source_pad_mask=source_pad_mask,
                                         target_pad_mask=(output == pad_id))
                 val, idx = torch.topk(att[:, -1, :], top_k)  # (B,K)
                 log_val = -torch.log(val)  # (B,K)
@@ -382,6 +427,10 @@ class Generator(nn.Module):
         mask[src_sz:, src_sz:] = self.generate_square_subsequent_mask(tgt_sz)
         return mask
 
+    def generate_square_subsequent_mask_with_source2(self, src_sz):
+        mask = self.generate_square_subsequent_mask(src_sz)
+        return mask
+
     def generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
@@ -410,17 +459,21 @@ class ClsGen(nn.Module):
                 max_len=300, get_emb=False):
         label = label.long() if label != None else label
         # img_mlc, img_emb = self.classifier(img=image, txt=history, lbl=label, threshold=threshold, pad_id=pad_id, get_embed=True) # (B,T,C), (B,T,E) (8,114,2),(8,114,256)
-        img_mlc, df_emb, ds_emb = self.classifier(img=image, txt=history, lbl=label, threshold=threshold, pad_id=pad_id,
+        img_mlc, df_emb, ds_emb, ds_emb2 = self.classifier(img=image, txt=history, lbl=label, threshold=threshold, pad_id=pad_id,
                                                   get_embed=True)  # (B,T,C), (B,T,E) (8,114,2),(8,114,256)
         dfs_emb = df_emb + ds_emb
+        dfs_emb2 = df_emb + ds_emb2
         # lbl_idx = torch.arange(img_emb.shape[1]).unsqueeze(0).repeat(img_emb.shape[0],1).to(img_emb.device) # (B,T)
         lbl_idx = torch.arange(dfs_emb.shape[1]).unsqueeze(0).repeat(dfs_emb.shape[0], 1).to(dfs_emb.device)  # (B,T)
         lbl_emb = self.label_embedding(lbl_idx)  # (B,T,E)
+        lbl_idx2 = torch.arange(dfs_emb2.shape[1]).unsqueeze(0).repeat(dfs_emb2.shape[0], 1).to(dfs_emb2.device)  # (B,T)
+        lbl_emb2 = self.label_embedding(lbl_idx2)  # (B,T,E)
         if caption != None:
             # src_emb = img_emb
             src_emb = dfs_emb + lbl_emb
+            src_emb2 = dfs_emb2 + lbl_emb2
             pad_mask = (caption == pad_id)
-            cap_gen, cap_emb = self.generator(source_embed=src_emb, token_index=caption,
+            cap_gen, cap_emb = self.generator(source_embed=src_emb, source_embed2=src_emb2, token_index=caption,
                                               target_pad_mask=pad_mask)  # (B,L,S), (B,L,E) ([8, 1000, 1000]), ([8, 1000, 256])
             # att emb
             if get_emb:
@@ -430,7 +483,8 @@ class ClsGen(nn.Module):
         else:
             # src_emb = img_emb
             src_emb = dfs_emb + lbl_emb
-            cap_gen = self.generator(source_embed=src_emb, token_index=caption, max_len=max_len, bos_id=bos_id,
+            src_emb2 = dfs_emb2 + lbl_emb2
+            cap_gen = self.generator(source_embed=src_emb, source_embed2=src_emb2, token_index=caption, max_len=max_len, bos_id=bos_id,
                                      pad_id=pad_id)  # (B,L,S)
             return cap_gen, img_mlc
 
@@ -450,8 +504,7 @@ class ClsGenInt(nn.Module):
                 max_len=300):
         if caption != None:
             pad_mask = (caption == pad_id)
-            cap_gen, img_mlc, cap_emb = self.clsgen(image, history, caption, label, threshold, bos_id, eos_id, pad_id,
-                                                    max_len, True)
+            cap_gen, img_mlc, cap_emb = self.clsgen(image, history, caption, label, threshold, bos_id, eos_id, pad_id, max_len, True)
             cap_mlc = self.interpreter(txt_embed=cap_emb, pad_mask=pad_mask)
             return cap_gen, img_mlc, cap_mlc
         else:

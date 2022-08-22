@@ -1,7 +1,8 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from tqdm import tqdm
 
 # ------ Helper Functions ------
@@ -53,7 +54,7 @@ def data_concatenate(iterable_data, dim=0):
 			return_data.append(torch.cat([*data_col], dim=dim))
 		return dict((k,return_data[i]) for i,k in enumerate(data.keys()))
 	else:
-		raise TypeError('Unsupported Datatype! Must be a Tensor/List/Tuple/Dict.')
+		raise TypeError('Unsupporxted Datatype! Must be a Tensor/List/Tuple/Dict.')
 
 def data_distributor(model, source):
 	if isinstance(source, torch.Tensor):
@@ -82,7 +83,6 @@ def args_to_kwargs(args, kwargs_list=None): # This function helps distribute inp
 def train(data_loader, model, optimizer, criterion, scheduler=None, device='cpu', kw_src=None, kw_tgt=None, kw_out=None, scaler=None):
 	model.train()
 	running_loss = 0
- 
 	prog_bar = tqdm(data_loader)
 	for i, (source, target) in enumerate(prog_bar):
 		source = data_to_device(source, device)
@@ -90,13 +90,12 @@ def train(data_loader, model, optimizer, criterion, scheduler=None, device='cpu'
 
 		source = args_to_kwargs(source, kw_src)
 		target = args_to_kwargs(target, kw_tgt)
-
 		if scaler != None:
 			with torch.cuda.amp.autocast():
 				output = data_distributor(model, source)
 				output = args_to_kwargs(output, kw_out)
 				loss = criterion(output, target)
-				
+
 			running_loss += loss.item()
 			prog_bar.set_description('Loss: {}'.format(running_loss/(i+1)))
 
@@ -183,6 +182,7 @@ def load(path, model, optimizer=None, scheduler=None):
 	stats = checkpoint['stats']
 	# --- Model Parameters ---
 	model.load_state_dict(checkpoint['model_state_dict'])
+	# model.load_state_dict(checkpoint['model_state_dict'], strict=False)
 	if optimizer != None:
 		try:
 			optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -194,3 +194,31 @@ def load(path, model, optimizer=None, scheduler=None):
 		except: # Input scheduler doesn't fit the checkpoint one --> should be ignored
 			print('Cannot load the scheduler')
 	return epoch, stats
+
+# def load2(path, model, optimizer=None, scheduler=None):
+# 	checkpoint = torch.load(path)
+# 	# --- Model Statistics ---
+# 	epoch = checkpoint['epoch']
+# 	stats = checkpoint['stats']
+# 	# new_state_dict = OrderedDict()
+# 	new_state_dict= {key.replace("module.txt_features2.", "txt_features2."): value for key, value in checkpoint.items()}
+# 	new_state_dict = {key.replace("module.", ""): value for key, value in new_state_dict.items()}
+# 	# for k, v in checkpoint.items():
+# 	# 	name = 'module.'+ k
+# 	# 	new_state_dict[name] = v
+# 	model.load_state_dict(new_state_dict)
+# 	# --- Model Parameters ---
+# 	# model.module.load_state_dict(checkpoint['model_state_dict'])
+# 	# model.load_state_dict(checkpoint['model_state_dict'])
+# 	# model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+# 	if optimizer != None:
+# 		try:
+# 			optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+# 		except: # Input optimizer doesn't fit the checkpoint one --> should be ignored
+# 			print('Cannot load the optimizer')
+# 	if scheduler != None:
+# 		try:
+# 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+# 		except: # Input scheduler doesn't fit the checkpoint one --> should be ignored
+# 			print('Cannot load the scheduler')
+# 	return epoch, stats

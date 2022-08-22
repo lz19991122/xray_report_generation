@@ -189,11 +189,9 @@ class Classifier(nn.Module):
             state_embed = self.state_embedding(state_index)  # (B,C,E),(8,2,256)
             # print("img_features_{},txt_features_{}".format(img_features.shape, txt_features.shape))
             # print(self.img_features(img_features).shape)
-            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,
-                                                                -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,-1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
             # img_features_torch.Size([8, 1024])-->([8, 114, 256])
-            txt_features, txt_attention = self.txt_features(txt_features, topic_embed,
-                                                            pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            txt_features, txt_attention = self.txt_features(txt_features, topic_embed, pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
             # ([8, 114, 256]),([8, 114, 1000])= self.txt_features((8, 1000, 256), (8,114,256), (8, 1000))
             final_embed = self.normalize(img_features + txt_features)  # (B,T,E) final_embed=D(fused)
             # final_embed = img_features + txt_features  # (B,T,E) final_embed=D(fused)
@@ -238,6 +236,8 @@ class Classifier(nn.Module):
             return att, txt_attention  # (B,T,C), (B,T,L)
         else:
             return att  # (B,T,C)
+
+
         # 原始论文
         # emb, att = self.attention(state_embed, final_embed) # (B,T,E), (B,T,C) 公式(5) att=p
         # #  ([8, 114, 256]),([8, 114, 2]) = self.attention(([8,2,256]), ([8, 114, 256]))
@@ -278,7 +278,103 @@ class Classifier(nn.Module):
         # else:
         #     return att # (B,T,C)
 
+class Classifier2(nn.Module):
+    def __init__(self, num_topics, num_states, cnn=None, tnn=None,
+                 fc_features=2048, embed_dim=128, num_heads=1, dropout=0.1):
+        super().__init__()
 
+        # For img & txt embedding and feature extraction
+        self.cnn = cnn
+        self.tnn = tnn
+        self.img_features = nn.Linear(fc_features, num_topics * embed_dim) if cnn != None else None
+        self.txt_features = MultiheadAttention(embed_dim, num_heads, dropout) if tnn != None else None
+
+        # For classification
+        self.topic_embedding = nn.Embedding(num_topics, embed_dim)
+        self.state_embedding = nn.Embedding(num_states, embed_dim)
+        self.attention = MultiheadAttention(embed_dim, num_heads)
+        # self.label_embedding = nn.Embedding(num_topics, embed_dim)
+
+        # Some constants
+        self.num_topics = num_topics
+        self.num_states = num_states
+        self.dropout = nn.Dropout(dropout)
+        self.normalize = nn.LayerNorm(embed_dim)
+
+    def forward(self, img=None, txt=None, lbl=None, txt_embed=None, pad_mask=None, pad_id=3, threshold=0.5,
+                get_embed=False, get_txt_att=False):
+        # --- Get img and txt features ---
+        if img != None:  # (B,C,W,H) or ((B,V,C,W,H), (B,V))
+            img_features, wxh_features = self.cnn(img)  # (B,F), (B,F,W,H) ([8, 1024]),([8, 1024, 8, 8])
+            # print("img_features.shape_{},wxh_features_{}".format(img_features.shape, wxh_features.shape))
+            img_features = self.dropout(img_features)  # (B,F)
+            # print("img_features.shape_{}".format(img_features.shape))
+        if txt != None:
+            if pad_id >= 0 and pad_mask == None:
+                pad_mask = (txt == pad_id)
+            txt_features = self.tnn(token_index=txt, pad_mask=pad_mask)  # (B,L,E) ([8, 1000, 256])
+            # print("txt_features.shape1_{}".format(txt_features.shape))
+        elif txt_embed != None:
+            txt_features = self.tnn(token_embed=txt_embed, pad_mask=pad_mask)  # (B,L,E)
+            # print("txt_embed_features2_{}".format(txt_features.shape))
+
+        # --- Fuse img and txt features ---
+        if img != None and (txt != None or txt_embed != None):
+            topic_index = torch.arange(self.num_topics).unsqueeze(0).repeat(img_features.shape[0], 1).to(
+                img_features.device)  # (B,T)
+            state_index = torch.arange(self.num_states).unsqueeze(0).repeat(img_features.shape[0], 1).to(
+                img_features.device)  # (B,C)
+            topic_embed = self.topic_embedding(topic_index)  # (B,T,E),(8,114,256)
+            state_embed = self.state_embedding(state_index)  # (B,C,E),(8,2,256)
+            # print("img_features_{},txt_features_{}".format(img_features.shape, txt_features.shape))
+            # print(self.img_features(img_features).shape)
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,-1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
+            # img_features_torch.Size([8, 1024])-->([8, 114, 256])
+            txt_features, txt_attention = self.txt_features(txt_features, topic_embed, pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            # ([8, 114, 256]),([8, 114, 1000])= self.txt_features((8, 1000, 256), (8,114,256), (8, 1000))
+            final_embed = self.normalize(img_features + txt_features)  # (B,T,E) final_embed=D(fused)
+            # final_embed = img_features + txt_features  # (B,T,E) final_embed=D(fused)
+
+        elif img != None:
+            topic_index = torch.arange(self.num_topics).unsqueeze(0).repeat(img_features.shape[0], 1).to(
+                img_features.device)  # (B,T)
+            state_index = torch.arange(self.num_states).unsqueeze(0).repeat(img_features.shape[0], 1).to(
+                img_features.device)  # (B,C)
+            topic_embed = self.topic_embedding(topic_index)  # (B,T,E)
+            state_embed = self.state_embedding(state_index)  # (B,C,E)
+
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,
+                                                                -1)  # (B,F) --> (B,T*E) --> (B,T,E)
+            final_embed = img_features  # (B,T,E)
+
+        elif txt != None or txt_embed != None:
+            topic_index = torch.arange(self.num_topics).unsqueeze(0).repeat(txt_features.shape[0], 1).to(
+                txt_features.device)  # (B,T)
+            state_index = torch.arange(self.num_states).unsqueeze(0).repeat(txt_features.shape[0], 1).to(
+                txt_features.device)  # (B,C)
+            topic_embed = self.topic_embedding(topic_index)  # (B,T,E)
+            state_embed = self.state_embedding(state_index)  # (B,C,E)
+
+            txt_features, txt_attention = self.txt_features(txt_features, topic_embed, pad_mask)  # (B,T,E), (B,T,L)
+            final_embed = txt_features  # (B,T,E) final_embed=D(fused)
+
+        else:
+            raise ValueError('img and (txt or txt_embed) must not be all none')
+
+        # Classifier output
+        emb, att = self.attention(state_embed, final_embed)  # (B,T,E), (B,T,C)
+
+        if lbl != None:  # Teacher forcing
+            emb = self.state_embedding(lbl)  # (B,T,E)
+        else:
+             emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
+
+        if get_embed:
+            return att, final_embed, emb  # (B,T,C), (B,T,E)
+        elif get_txt_att and (txt != None or txt_embed != None):
+            return att, txt_attention  # (B,T,C), (B,T,L)
+        else:
+            return att  # (B,T,C)
 class Generator(nn.Module):
     def __init__(self, num_tokens, num_posits, embed_dim=128, num_heads=1, fwd_dim=256, dropout=0.1, num_layers=12):
         super().__init__()
@@ -400,11 +496,13 @@ class Generator(nn.Module):
 
 # --- Full Models ---
 class ClsGen(nn.Module):
-    def __init__(self, classifier, generator, num_topics, embed_dim):
+    def __init__(self, classifier, generator, classifier2, tnn, num_topics, embed_dim):
         super().__init__()
         self.classifier = classifier
         self.generator = generator
         self.label_embedding = nn.Embedding(num_topics, embed_dim)
+        self.classifier2 = classifier2
+        self.tnn = tnn
 
     def forward(self, image, history=None, caption=None, label=None, threshold=0.15, bos_id=1, eos_id=2, pad_id=3,
                 max_len=300, get_emb=False):
@@ -416,17 +514,18 @@ class ClsGen(nn.Module):
         # lbl_idx = torch.arange(img_emb.shape[1]).unsqueeze(0).repeat(img_emb.shape[0],1).to(img_emb.device) # (B,T)
         lbl_idx = torch.arange(dfs_emb.shape[1]).unsqueeze(0).repeat(dfs_emb.shape[0], 1).to(dfs_emb.device)  # (B,T)
         lbl_emb = self.label_embedding(lbl_idx)  # (B,T,E)
+
         if caption != None:
             # src_emb = img_emb
             src_emb = dfs_emb + lbl_emb
             pad_mask = (caption == pad_id)
-            cap_gen, cap_emb = self.generator(source_embed=src_emb, token_index=caption,
-                                              target_pad_mask=pad_mask)  # (B,L,S), (B,L,E) ([8, 1000, 1000]), ([8, 1000, 256])
+            cap_gen, cap_emb = self.generator(source_embed=src_emb, token_index=caption, target_pad_mask=pad_mask)  # (B,L,S), (B,L,E) ([8, 1000, 1000]), ([8, 1000, 256])
+            cap0_mlc = self.classifier2(txt_embed=cap_emb, pad_mask=pad_mask)
             # att emb
             if get_emb:
-                return cap_gen, img_mlc, cap_emb
+                return cap_gen, img_mlc, cap_emb, cap0_mlc
             else:
-                return cap_gen, img_mlc
+                return cap_gen, img_mlc, cap0_mlc
         else:
             # src_emb = img_emb
             src_emb = dfs_emb + lbl_emb
@@ -450,9 +549,9 @@ class ClsGenInt(nn.Module):
                 max_len=300):
         if caption != None:
             pad_mask = (caption == pad_id)
-            cap_gen, img_mlc, cap_emb = self.clsgen(image, history, caption, label, threshold, bos_id, eos_id, pad_id,
+            cap_gen, img_mlc, cap_emb, cap0_mlc = self.clsgen(image, history, caption, label, threshold, bos_id, eos_id, pad_id,
                                                     max_len, True)
             cap_mlc = self.interpreter(txt_embed=cap_emb, pad_mask=pad_mask)
-            return cap_gen, img_mlc, cap_mlc
+            return cap_gen, img_mlc, cap_mlc, cap0_mlc
         else:
             return self.clsgen(image, history, caption, label, threshold, bos_id, eos_id, pad_id, max_len, False)

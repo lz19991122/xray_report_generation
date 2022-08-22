@@ -22,7 +22,7 @@ from tqdm import tqdm
 from utils import save, load, train, test, data_to_device, data_concatenate
 from datasets import NIHCXR, MIMIC, NLMCXR
 from losses import CELoss, CELossTotal, CELossTotalEval, CELossTransfer, CELossShift
-from models import CNN, MVCNN, TNN, Classifier, Generator, ClsGen, ClsGenInt
+from modelpmask import CNN, MVCNN, TNN, Classifier, Generator, ClsGen, ClsGenInt
 from baselines.transformer.models import LSTM_Attn, Transformer, GumbelTransformer
 from baselines.rnn.models import ST
 
@@ -68,11 +68,11 @@ os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=123)
 
-RELOAD = False # True / False
-PHASE = 'TRAIN' # TRAIN / TEST / INFER
-DATASET_NAME = 'NLMCXR' # NIHCXR / NLMCXR / MIMIC
+RELOAD = True # True / False
+PHASE = 'INFER' # TRAIN / TEST / INFER
+DATASET_NAME = 'NLMCXR' # NIHCXR / NLMCXR / MIMICn
 BACKBONE_NAME = 'DenseNet121' # ResNeSt50 / ResNet50 / DenseNet121
-MODEL_NAME = 'ClsGen' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
+MODEL_NAME = 'ClsGenInt' # ClsGen / ClsGenInt / VisualTransformer / GumbelTransformer
 
 if DATASET_NAME == 'MIMIC':
     EPOCHS = 50 # Start overfitting after 20 epochs
@@ -120,7 +120,7 @@ if __name__ == "__main__":
         NUM_LABELS = 114
         NUM_CLASSES = 2
         
-        dataset = MIMIC('/home/hoang/Datasets/MIMIC/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
+        dataset = MIMIC('/home/lihongzhao/xray_report_generation/datasets/mimic_cxr/', INPUT_SIZE, view_pos=['AP','PA','LATERAL'], max_views=MAX_VIEWS, sources=SOURCES, targets=TARGETS)
         train_data, val_data, test_data = dataset.get_subsets(pvt=0.9, seed=0, generate_splits=True, debug_mode=False, train_phase=(PHASE == 'TRAIN'))
         
         VOCAB_SIZE = len(dataset.vocab)
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         NUM_LAYERS = 12
         
         cls_model = Classifier(num_topics=NUM_LABELS, num_states=NUM_CLASSES, cnn=cnn, tnn=tnn, fc_features=FC_FEATURES, embed_dim=NUM_EMBEDS, num_heads=NUM_HEADS, dropout=DROPOUT)
-        gen_model = Generator(num_tokens=VOCAB_SIZE, num_posits=POSIT_SIZE, embed_dim=NUM_EMBEDS, num_heads=NUM_HEADS, fwd_dim=FWD_DIM, dropout=DROPOUT, num_layers=NUM_LAYERS)
+        gen_model = Generator(num_tokens=VOCAB_SIZE, num_posits=POSIT_SIZE,  embed_dim=NUM_EMBEDS, num_heads=NUM_HEADS, fwd_dim=FWD_DIM, dropout=DROPOUT, num_layers=NUM_LAYERS)
         
         model = ClsGen(cls_model, gen_model, NUM_LABELS, NUM_EMBEDS)
         criterion = CELossTotal(ignore_index=3)
@@ -209,12 +209,12 @@ if __name__ == "__main__":
         
         clsgen_model = ClsGen(cls_model, gen_model, NUM_LABELS, NUM_EMBEDS)
         clsgen_model = nn.DataParallel(clsgen_model).cuda()
-        
+
         if not RELOAD:
             checkpoint_path_from = 'checkpoints/{}_ClsGen_{}_{}.pt'.format(DATASET_NAME, BACKBONE_NAME, COMMENT)
             last_epoch, (best_metric, test_metric) = load(checkpoint_path_from, clsgen_model)
             print('Reload From: {} | Last Epoch: {} | Validation Metric: {} | Test Metric: {}'.format(checkpoint_path_from, last_epoch, best_metric, test_metric))
-        
+
         # Initialize the Interpreter module
         NUM_HEADS = 8
         NUM_LAYERS = 1
@@ -378,7 +378,8 @@ if __name__ == "__main__":
         # print('Micro Recall   : {}'.format(metrics.recall_score(test_targets.cpu()[...,:NUM_LABELS] == 1, test_outputs.cpu()[...,:NUM_LABELS,1] > threshold, average='micro')))
         
     elif PHASE == 'INFER':
-        txt_test_outputs, txt_test_targets = infer(test_loader, model, device='cuda', threshold=0.19)
+
+        txt_test_outputs, txt_test_targets = infer(test_loader, model, device='cuda', threshold=0.16)
         gen_outputs = txt_test_outputs[0]
         gen_targets = txt_test_targets[0]
         

@@ -19,7 +19,7 @@ import torchvision.transforms as transforms
 from utils import save, load, train, test
 from datasets import MIMIC, NLMCXR
 from losses import CELoss
-from models import Classifier, TNN
+from modelsp import Classifier, TNN
 from baselines.transformer.models import LSTM_Attn
 
 # --- Hyperparameters ---
@@ -28,8 +28,8 @@ os.environ["OMP_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 torch.manual_seed(seed=0)
 
-RELOAD = True # True / False
-PHASE = 'TEST' # TRAIN / TEST
+RELOAD = False # True / False
+PHASE = 'TRAIN' # TRAIN / TEST
 DATASET_NAME = 'NLMCXR' # MIMIC / NLMCXR
 MODEL_NAME = 'Transformer' # Transformer / LSTM
 

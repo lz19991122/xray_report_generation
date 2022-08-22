@@ -20,6 +20,21 @@ class MultiheadAttention(nn.Module):
         embed = embed.permute(1, 0, 2)  # (B,Q,E)
         return embed, att  # (B,Q,E), (B,Q,V)
 
+class MultiheadAttention2(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout)
+        self.normalize = nn.LayerNorm(embed_dim)
+
+    def forward(self, query, value, key, pad_mask=None, att_mask=None):
+        query = query.permute(1, 0, 2)  # (Q,B,E)
+        value = value.permute(1, 0, 2)  # (V,B,E))
+        key = key.permute(1, 0, 2)      # (K,B,E)
+        embed, att = self.attention(query, value, key, key_padding_mask=pad_mask, attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
+
+        embed = self.normalize(embed + query)  # (Q,B,E)
+        embed = embed.permute(1, 0, 2)  # (B,Q,E)
+        return embed, att  # (B,Q,E), (B,Q,V)
 
 class PointwiseFeedForward(nn.Module):
     def __init__(self, emb_dim, fwd_dim, dropout=0.0):
@@ -49,6 +64,20 @@ class TransformerLayer(nn.Module):
         emb = self.fwd_layer(emb)
         return emb, att
 
+class TransformerLayer2(nn.Module):
+    def __init__(self, embed_dim, num_heads, fwd_dim, dropout=0.0):
+        super().__init__()
+        self.attention = MultiheadAttention(embed_dim, num_heads, dropout)
+        self.attention2 = MultiheadAttention2(embed_dim, num_heads, dropout)
+        self.fwd_layer = PointwiseFeedForward(embed_dim, fwd_dim, dropout)
+
+    def forward(self, f_input, e_input, pad_mask=None, att_mask=None):
+        emb, att = self.attention(f_input, f_input, pad_mask, att_mask)
+        emb = self.fwd_layer(emb)
+        emb, att = self.attention2(emb, e_input, e_input)
+        # emb, att = self.attention(emb, emb, pad_mask, att_mask1)
+        emb = self.fwd_layer(emb)
+        return emb, att
 
 class TNN(nn.Module):
     def __init__(self, embed_dim, num_heads, fwd_dim, dropout=0.1, num_layers=1,
@@ -149,6 +178,7 @@ class Classifier(nn.Module):
         self.tnn = tnn
         self.img_features = nn.Linear(fc_features, num_topics * embed_dim) if cnn != None else None
         self.txt_features = MultiheadAttention(embed_dim, num_heads, dropout) if tnn != None else None
+        self.txt_features2 = MultiheadAttention2(embed_dim, num_heads, dropout) if tnn != None else None
 
         # For classification
         self.topic_embedding = nn.Embedding(num_topics, embed_dim)
@@ -189,11 +219,11 @@ class Classifier(nn.Module):
             state_embed = self.state_embedding(state_index)  # (B,C,E),(8,2,256)
             # print("img_features_{},txt_features_{}".format(img_features.shape, txt_features.shape))
             # print(self.img_features(img_features).shape)
-            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,
-                                                                -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics, -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
             # img_features_torch.Size([8, 1024])-->([8, 114, 256])
-            txt_features, txt_attention = self.txt_features(txt_features, topic_embed,
-                                                            pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features2 = img_features + topic_embed
+            txt_features, txt_attention = self.txt_features2(img_features, txt_features, txt_features, pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features, txt_attention = self.txt_features2(img_features2, img_features2, txt_features)
             # ([8, 114, 256]),([8, 114, 1000])= self.txt_features((8, 1000, 256), (8,114,256), (8, 1000))
             final_embed = self.normalize(img_features + txt_features)  # (B,T,E) final_embed=D(fused)
             # final_embed = img_features + txt_features  # (B,T,E) final_embed=D(fused)
@@ -230,7 +260,7 @@ class Classifier(nn.Module):
         if lbl != None:  # Teacher forcing
             emb = self.state_embedding(lbl)  # (B,T,E)
         else:
-             emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
+            emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
 
         if get_embed:
             return att, final_embed, emb  # (B,T,C), (B,T,E)
@@ -238,45 +268,6 @@ class Classifier(nn.Module):
             return att, txt_attention  # (B,T,C), (B,T,L)
         else:
             return att  # (B,T,C)
-        # 原始论文
-        # emb, att = self.attention(state_embed, final_embed) # (B,T,E), (B,T,C) 公式(5) att=p
-        # #  ([8, 114, 256]),([8, 114, 2]) = self.attention(([8,2,256]), ([8, 114, 256]))
-        # #  lbl_torch.Size([8, 114])
-        # if lbl != None: # Teacher forcing
-        #     emb = self.state_embedding(lbl) # (B,T,E)
-        #     # emb ([8, 114, 256])
-        # else:
-        #     emb = self.state_embedding((att[:,:,1] > threshold).long()) # (B,T,E) emb=D(states)
-        # en_emb = final_embed + emb
-        # lbl_idx = torch.arange(en_emb.shape[1]).unsqueeze(0).repeat(en_emb.shape[0], 1).to(en_emb.device)  # (B,T)
-        # lbl_emb = self.label_embedding(lbl_idx)  # (B,T,E)
-        # enr_emb = en_emb + lbl_emb
-        # if get_embed:
-        #     # return att, final_embed + emb # (B,T,C), (B,T,E)
-        #     return att, enr_emb  # (B,T,C), (B,T,E)
-        # elif get_txt_att and (txt != None or txt_embed != None):
-        #     return att, txt_attention # (B,T,C), (B,T,L)
-        # else:
-        #     return att # (B,T,C)
-
-        # # 使用Dfused+Dtopic
-        # lbl_idx = torch.arange(final_embed.shape[1]).unsqueeze(0).repeat(final_embed.shape[0], 1).to(final_embed.device)
-        # lbl_emb = self.label_embedding(lbl_idx) #Dtopic
-        # ft_emb = final_embed + lbl_emb
-        # emb, att = self.attention(state_embed, ft_emb)
-        # if lbl != None: # Teacher forcing
-        #     emb = self.state_embedding(lbl) # (B,T,E)
-        #     # emb ([8, 114, 256])
-        # else:
-        #     emb = self.state_embedding((att[:,:,1] > threshold).long()) # (B,T,E) emb=D(states)
-        # enr_emb = ft_emb + emb
-        # if get_embed:
-        #     # return att, final_embed + emb # (B,T,C), (B,T,E)
-        #     return att, enr_emb  # (B,T,C), (B,T,E)
-        # elif get_txt_att and (txt != None or txt_embed != None):
-        #     return att, txt_attention # (B,T,C), (B,T,L)
-        # else:
-        #     return att # (B,T,C)
 
 
 class Generator(nn.Module):
@@ -284,8 +275,8 @@ class Generator(nn.Module):
         super().__init__()
         self.token_embedding = nn.Embedding(num_tokens, embed_dim)
         self.posit_embedding = nn.Embedding(num_posits, embed_dim)
-        self.transform = nn.ModuleList(
-            [TransformerLayer(embed_dim, num_heads, fwd_dim, dropout) for _ in range(num_layers)])
+        self.transform2 = nn.ModuleList(
+            [TransformerLayer2(embed_dim, num_heads, fwd_dim, dropout) for _ in range(num_layers)])
         self.attention = MultiheadAttention(embed_dim, num_heads)
         self.num_tokens = num_tokens
         self.num_posits = num_posits
@@ -310,13 +301,10 @@ class Generator(nn.Module):
                 target_pad_mask = torch.zeros((target_embed.shape[0], target_embed.shape[1]),
                                               device=target_embed.device).bool()  # (B,L)
             pad_mask = torch.cat([source_pad_mask, target_pad_mask], dim=1)  # (B,T+L) ([8, 1114])
-            att_mask = self.generate_square_subsequent_mask_with_source(source_embed.shape[1], target_embed.shape[1],
-                                                                        mode).to(
-                final_embed.device)  # (T+L,T+L) ([1114, 1114])
-
+            att_mask = self.generate_square_subsequent_mask_with_source(source_embed.shape[1], target_embed.shape[1], mode).to(final_embed.device)  # (T+L,T+L) ([1114, 1114])
             # Transformer Decoder
-            for i in range(len(self.transform)):
-                final_embed = self.transform[i](final_embed, pad_mask, att_mask)[0]
+            for i in range(len(self.transform2)):
+                final_embed = self.transform2[i](final_embed, source_embed, pad_mask, att_mask)[0]
                 # ([8, 1114, 256])
 
             # Make prediction for next tokens

@@ -28,6 +28,7 @@ class CELoss(nn.Module):
 		Output: (N,*,C) \n
 		Target: (N,*) \n
 		'''
+		# print(output.shape, target.shape)
 		output = torch.log(output)  # Invert softmax
 		output = output.reshape(-1, output.shape[-1])  # (*,C)
 		target = target.reshape(-1).long()  # (*)
@@ -64,20 +65,26 @@ class CELossShift(nn.Module):
 		Output: (N,*,C) \n
 		Target: (N,*) \n
 		'''
+		# print(output.shape,target.shape)
 		output = output[:,:-1,:] # (* - 1,C)
 		target = target[:,1:] # (* - 1)
+		# print(output.shape, target.shape)
 		return self.CELoss(output, target)
 
-class CELossTotal(nn.Module):
+class CELossTotal(nn.Module):# ClsGen loss
 	def __init__(self, ignore_index=-1):
 		super().__init__()
 		self.CELoss = CELoss()
 		self.CELossShift = CELossShift(ignore_index=ignore_index)
 
 	def forward(self, output, target):
+		# print(output[0].shape, target[0].shape)
+		# print(output[1].shape, target[1].shape)
 		return self.CELossShift(output[0], target[0]) + self.CELoss(output[1], target[1])
+		# output[0], target[0]--> ([8, 1000, 1000]) ([8, 1000])		Lg
+		# output[1], target[1]--> ([8, 114, 2]) ([8, 114])		Lc
 
-class CELossTotalEval(nn.Module):
+class CELossTotalEval(nn.Module):# ClsGenInt loss
 	def __init__(self, ignore_index=-1):
 		super().__init__()
 		self.CELoss = CELoss()

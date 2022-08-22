@@ -20,6 +20,21 @@ class MultiheadAttention(nn.Module):
         embed = embed.permute(1, 0, 2)  # (B,Q,E)
         return embed, att  # (B,Q,E), (B,Q,V)
 
+class MultiheadAttention2(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout)
+        self.normalize = nn.LayerNorm(embed_dim)
+
+    def forward(self, query, value, key, pad_mask=None, att_mask=None):
+        query = query.permute(1, 0, 2)  # (Q,B,E)
+        value = value.permute(1, 0, 2)  # (V,B,E))
+        key = key.permute(1, 0, 2)      # (K,B,E)
+        embed, att = self.attention(query, value, key, key_padding_mask=pad_mask, attn_mask=att_mask)  # (Q,B,E), (B,Q,V)
+
+        embed = self.normalize(embed + query)  # (Q,B,E)
+        embed = embed.permute(1, 0, 2)  # (B,Q,E)
+        return embed, att  # (B,Q,E), (B,Q,V)
 
 class PointwiseFeedForward(nn.Module):
     def __init__(self, emb_dim, fwd_dim, dropout=0.0):
@@ -149,6 +164,7 @@ class Classifier(nn.Module):
         self.tnn = tnn
         self.img_features = nn.Linear(fc_features, num_topics * embed_dim) if cnn != None else None
         self.txt_features = MultiheadAttention(embed_dim, num_heads, dropout) if tnn != None else None
+        self.txt_features2 = MultiheadAttention2(embed_dim, num_heads, dropout) if tnn != None else None
 
         # For classification
         self.topic_embedding = nn.Embedding(num_topics, embed_dim)
@@ -189,11 +205,11 @@ class Classifier(nn.Module):
             state_embed = self.state_embedding(state_index)  # (B,C,E),(8,2,256)
             # print("img_features_{},txt_features_{}".format(img_features.shape, txt_features.shape))
             # print(self.img_features(img_features).shape)
-            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics,
-                                                                -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
+            img_features = self.img_features(img_features).view(img_features.shape[0], self.num_topics, -1)  # (B,F) --> (B,T*E) --> (B,T,E):([8, 1024])-->([8, 29184])-->([8, 114, 256])
             # img_features_torch.Size([8, 1024])-->([8, 114, 256])
-            txt_features, txt_attention = self.txt_features(txt_features, topic_embed,
-                                                            pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features2 = img_features + topic_embed
+            txt_features, txt_attention = self.txt_features2(img_features2, txt_features, txt_features, pad_mask)  # (B,T,E), (B,T,L) topic_embed=H  txt_features=Q
+            img_features, txt_attention = self.txt_features2(img_features2, img_features2, txt_features)
             # ([8, 114, 256]),([8, 114, 1000])= self.txt_features((8, 1000, 256), (8,114,256), (8, 1000))
             final_embed = self.normalize(img_features + txt_features)  # (B,T,E) final_embed=D(fused)
             # final_embed = img_features + txt_features  # (B,T,E) final_embed=D(fused)
@@ -230,7 +246,7 @@ class Classifier(nn.Module):
         if lbl != None:  # Teacher forcing
             emb = self.state_embedding(lbl)  # (B,T,E)
         else:
-             emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
+            emb = self.state_embedding((att[:, :, 1] > threshold).long())  # (B,T,E)
 
         if get_embed:
             return att, final_embed, emb  # (B,T,C), (B,T,E)

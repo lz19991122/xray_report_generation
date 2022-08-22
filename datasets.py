@@ -432,24 +432,20 @@ class NLMCXR(data.Dataset): # Open-I Dataset
 
         # ------ Additional Information ------
         info = self.file_report[file_name]['report']
-        
         source_info = []
         for section, content in info.items():
             if section in self.source_sections:
                 source_info.append(content)
         source_info = ' '.join(source_info)
-        
         encoded_source_info = [self.vocab.bos_id()] + self.vocab.encode(source_info) + [self.vocab.eos_id()]
         source_info = np.ones(self.max_len, dtype=np.int64) * self.vocab.pad_id()
         source_info[:min(len(encoded_source_info), self.max_len)] = encoded_source_info[:min(len(encoded_source_info), self.max_len)]
-
         target_info = []
         for section, content in info.items():
             if section in self.target_sections:
                 target_info.append(content)
         # target_info = ' '.join(target_info)
         target_info = tmp_rep # This load the document from our previous AAAI paper (preprocessed documents)
-        
         np_labels = np.zeros(len(self.top_np), dtype=float)
         for i in range(len(self.top_np)):
             if self.top_np[i] in target_info:
@@ -458,7 +454,6 @@ class NLMCXR(data.Dataset): # Open-I Dataset
         encoded_target_info = [self.vocab.bos_id()] + self.vocab.encode(target_info) + [self.vocab.eos_id()]
         target_info = np.ones(self.max_len, dtype=np.int64) * self.vocab.pad_id()
         target_info[:min(len(encoded_target_info), self.max_len)] = encoded_target_info[:min(len(encoded_target_info), self.max_len)]
-
         for i in range(len(self.sources)):
             if self.sources[i] == 'image':
                 sources.append((imgs,vpos))

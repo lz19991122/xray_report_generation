@@ -18,7 +18,7 @@ import torchvision.transforms as transforms
 # --- Project Packages ---
 from utils import save, load, train, test
 from datasets import MIMIC, NLMCXR, TextDataset
-from models import Classifier, TNN
+from modelpmask import Classifier, TNN
 from baselines.transformer.models import LSTM_Attn
 
 # --- Hyperparameters ---
@@ -31,8 +31,8 @@ DATASET_NAME = 'NLMCXR' # MIMIC / NLMCXR
 MODEL_NAME = 'Transformer' # Transformer / LSTM
 BATCH_SIZE = 32
 
-TEXT_FILE = 'outputs/{}_ClsGen_ResNet50_MaxView2_NumLabel114_History_Hyp.txt'.format(DATASET_NAME)
-LABEL_FILE = 'outputs/{}_ClsGen_ResNet50_MaxView2_NumLabel114_History_Lbl.txt'.format(DATASET_NAME)
+TEXT_FILE = '/home/lihongzhao/xray_report_generation/outputs/{}_ClsGenInt_DenseNet121_MaxView2_NumLabel114_History_Hpy.txt'.format(DATASET_NAME)
+LABEL_FILE = '/home/lihongzhao/xray_report_generation/outputs/{}_ClsGenInt_DenseNet121_MaxView2_NumLabel114_History_Lbl.txt'.format(DATASET_NAME)
 
 if __name__ == "__main__":
     # --- Choose Inputs/Outputs
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     test_rec = []
     test_acc = []
     
-    threshold = 0.5
+    threshold = 0.3
     NUM_LABELS = 14
     for i in range(NUM_LABELS):
         try:
